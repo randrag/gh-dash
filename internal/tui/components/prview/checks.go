@@ -461,7 +461,7 @@ func (sidebar *Model) renderChecks() string {
 				workflowName,
 			)
 			awaitingApproval = append(awaitingApproval, check)
-		} else if suite.Status == "QUEUED" || suite.Status == "PENDING" || suite.Status == "WAITING" {
+		} else if isWorkflowSuiteWaitingToStart(suite) {
 			// Workflow is queued/pending (will run automatically)
 			check := lipgloss.JoinHorizontal(
 				lipgloss.Top,
@@ -612,6 +612,15 @@ func (m *Model) getStatusCheckRollupStats(rollup data.StatusCheckRollupStats) ch
 	return res
 }
 
+func isWorkflowSuiteWaitingToStart(suite data.CheckSuiteNode) bool {
+	// GitHub queues a suite on every push for each app with checks permission.
+	// An app that never creates check runs leaves it QUEUED, with no workflow run.
+	hasWorkflowRun := strings.TrimSpace(string(suite.WorkflowRun.Workflow.Name)) != ""
+	isWaitingToStart := suite.Status == "QUEUED" || suite.Status == "PENDING" ||
+		suite.Status == "WAITING"
+	return hasWorkflowRun && isWaitingToStart
+}
+
 func (m *Model) getChecksStats() checksStats {
 	var res checksStats
 	commits := m.pr.Data.Enriched.Commits.Nodes
@@ -647,7 +656,7 @@ func (m *Model) getChecksStats() checksStats {
 	for _, suite := range lastCommit.Commit.CheckSuites.Nodes {
 		if suite.Conclusion == "ACTION_REQUIRED" {
 			res.awaitingApproval++
-		} else if suite.Status == "QUEUED" || suite.Status == "PENDING" || suite.Status == "WAITING" {
+		} else if isWorkflowSuiteWaitingToStart(suite) {
 			res.inProgress++
 		}
 	}

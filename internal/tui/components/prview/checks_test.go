@@ -183,6 +183,19 @@ func makeCheckSuite(workflowName string, status string, conclusion string) data.
 	}
 }
 
+func makeCheckSuiteWithoutWorkflowRun(
+	appName string,
+	status string,
+	conclusion string,
+) data.CheckSuiteNode {
+	suite := data.CheckSuiteNode{
+		Status:     graphql.String(status),
+		Conclusion: graphql.String(conclusion),
+	}
+	suite.App.Name = graphql.String(appName)
+	return suite
+}
+
 func TestRenderChecks_AwaitingApproval(t *testing.T) {
 	// Test that CheckSuites with conclusion: ACTION_REQUIRED are shown
 	// under "Awaiting Approval" section
@@ -507,6 +520,58 @@ func TestGetChecksStats_Mixed(t *testing.T) {
 	// 1 from IN_PROGRESS check run + 1 from QUEUED check suite
 	require.Equal(t, 2, stats.inProgress,
 		"expected 2 in progress, got: %d", stats.inProgress)
+}
+
+func TestRenderChecks_IgnoresQueuedSuitesWithoutWorkflowRun(t *testing.T) {
+	opts := checksTestOptions{
+		checkSuites: data.CheckSuites{
+			TotalCount: 3,
+			Nodes: []data.CheckSuiteNode{
+				makeCheckSuiteWithoutWorkflowRun("Claude", "QUEUED", ""),
+				makeCheckSuiteWithoutWorkflowRun("Cursor", "QUEUED", ""),
+				makeCheckSuite("CI", "COMPLETED", "SUCCESS"),
+			},
+		},
+		checkRuns: []data.CheckRun{
+			makeCheckRun("build", "COMPLETED", "SUCCESS"),
+		},
+		rollupState: "SUCCESS",
+	}
+
+	m := newTestModelForChecks(t, opts)
+	got := m.renderChecks()
+
+	require.False(t, strings.Contains(got, "Claude"),
+		"expected empty 'Claude' suite to be hidden, got: %q", got)
+	require.False(t, strings.Contains(got, "Cursor"),
+		"expected empty 'Cursor' suite to be hidden, got: %q", got)
+	require.False(t, strings.Contains(got, constants.WaitingIcon),
+		"expected no WaitingIcon, got: %q", got)
+}
+
+func TestGetChecksStats_IgnoresQueuedSuitesWithoutWorkflowRun(t *testing.T) {
+	opts := checksTestOptions{
+		checkSuites: data.CheckSuites{
+			TotalCount: 3,
+			Nodes: []data.CheckSuiteNode{
+				makeCheckSuiteWithoutWorkflowRun("Claude", "QUEUED", ""),
+				makeCheckSuiteWithoutWorkflowRun("Cursor", "QUEUED", ""),
+				makeCheckSuite("Build", "QUEUED", ""),
+			},
+		},
+		checkRuns: []data.CheckRun{
+			makeCheckRun("lint", "COMPLETED", "SUCCESS"),
+		},
+		rollupState: "PENDING",
+	}
+
+	m := newTestModelForChecks(t, opts)
+	stats := m.getChecksStats()
+
+	require.Equal(t, 1, stats.inProgress,
+		"expected 1 in progress (only the workflow suite), got: %d", stats.inProgress)
+	require.Equal(t, 1, stats.succeeded,
+		"expected 1 succeeded, got: %d", stats.succeeded)
 }
 
 func TestViewChecksBar_NarrowWidth_NoPanic(t *testing.T) {
